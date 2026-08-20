@@ -170,7 +170,7 @@ async function magicScrape(targetUrl: string) {
 export async function POST() {
   try {
     // Process smaller batch sizes (5) because deep crawling takes longer
-    const batchSize = 5; 
+    const batchSize = 2; 
     const leads = await prisma.lead.findMany({
       where: { isExtracted: false },
       take: batchSize,
