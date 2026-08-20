@@ -3,85 +3,62 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import * as cheerio from "cheerio";
 
-export const maxDuration = 60; // Max timeout for Vercel
+export const maxDuration = 15;
 export const dynamic = "force-dynamic";
 
-// Regex Definitions
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
 const FB_REGEX = /https?:\/\/(?:www\.)?(?:facebook\.com|fb\.com)\/[a-zA-Z0-9._%-]+/gi;
-
-// Validation Blocklists
 const JUNK_DOMAINS = ["wixpress.com", "sentry.io", "example.com", "wix.com", "domain.com", "weebly.com"];
 const JUNK_PREFIXES = ["noreply", "no-reply", "donotreply", "admin", "postmaster", "mailer-daemon"];
 const JUNK_EXTENSIONS = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".css", ".js"];
 const INVALID_FB_PATHS = ["/sharer", "/share", "/pages/create", "/help", "/policies", "/login", "/dialog"];
 
-/**
- * Fetch a URL with an abort timeout
- */
 async function fetchPage(url: string, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0" },
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0" },
       redirect: "follow",
     });
     clearTimeout(timeoutId);
     if (!res.ok) return null;
     return await res.text();
-  } catch (error) {
+  } catch {
     clearTimeout(timeoutId);
     return null;
   }
 }
 
-/**
- * Validate and Score Emails
- * 1. Exact domain match (e.g., info@15thstreetpetgrooming.com) -> Score 2
- * 2. Standard free emails (e.g., grooming@gmail.com) -> Score 1
- */
 function validateAndRankEmails(rawEmails: string[], baseDomain: string) {
   const uniqueEmails = Array.from(new Set(rawEmails.map((e) => e.toLowerCase())));
-  
   const validEmails = uniqueEmails.filter((email) => {
     const [prefix, domain] = email.split("@");
     if (!domain || !prefix) return false;
-    
-    // Filter out images mapped as emails and obvious junk
     if (JUNK_EXTENSIONS.some((ext) => email.endsWith(ext))) return false;
     if (JUNK_DOMAINS.some((junk) => domain.includes(junk))) return false;
     if (JUNK_PREFIXES.some((junk) => prefix === junk)) return false;
-    
     return true;
   });
 
-  // Sort by relevance (Domain match first, then Gmail/Yahoo, then others)
   return validEmails.sort((a, b) => {
     const domainA = a.split("@")[1];
     const domainB = b.split("@")[1];
     const baseClean = baseDomain.replace("www.", "");
-    
     const isDomainA = domainA.includes(baseClean);
     const isDomainB = domainB.includes(baseClean);
-    
     if (isDomainA && !isDomainB) return -1;
     if (!isDomainA && isDomainB) return 1;
     return 0;
   });
 }
 
-/**
- * Validate Facebook URLs
- */
 function validateFacebook(rawUrls: string[]) {
   const uniqueUrls = Array.from(new Set(rawUrls.map(u => u.toLowerCase().replace(/\/$/, ""))));
-  
   return uniqueUrls.filter(url => {
     try {
       const parsed = new URL(url);
-      // Ensure it's not a sharing link or system page
       if (INVALID_FB_PATHS.some(path => parsed.pathname.startsWith(path))) return false;
       if (parsed.pathname === "/" || parsed.pathname === "") return false;
       return true;
@@ -91,13 +68,9 @@ function validateFacebook(rawUrls: string[]) {
   });
 }
 
-/**
- * The "Magic" Deep Scraper
- */
 async function magicScrape(targetUrl: string) {
   let formattedUrl = targetUrl.trim();
   if (!/^https?:\/\//i.test(formattedUrl)) formattedUrl = `https://${formattedUrl}`;
-  
   let baseUrl: URL;
   try {
     baseUrl = new URL(formattedUrl);
@@ -105,57 +78,53 @@ async function magicScrape(targetUrl: string) {
     throw new Error("Invalid URL format");
   }
 
-  // 1. Fetch Homepage
   const homeHtml = await fetchPage(formattedUrl);
   if (!homeHtml) throw new Error("Website unreachable");
 
   const $ = cheerio.load(homeHtml);
   let aggregateHtml = homeHtml;
-
-  // 2. Find Contact/About Pages automatically
   const subpagesToVisit = new Set<string>();
+  
+  // Scrape mailto: explicitly from the homepage
+  const extractedMailtos: string[] = [];
+  $('a[href^="mailto:"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (href) extractedMailtos.push(href.replace('mailto:', '').split('?')[0].trim());
+  });
   
   $("a").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
-    
     const lowerText = $(el).text().toLowerCase();
     const lowerHref = href.toLowerCase();
-    
-    // If link text or URL contains contact keywords
-    if (
-      lowerText.includes("contact") || lowerText.includes("about") || 
-      lowerHref.includes("contact") || lowerHref.includes("about")
-    ) {
+    if (lowerText.includes("contact") || lowerText.includes("about") || lowerHref.includes("contact") || lowerHref.includes("about")) {
       try {
-        // Resolve relative links (e.g., "/contact-us" -> "https://domain.com/contact-us")
         const resolvedUrl = new URL(href, baseUrl.href).href;
-        // Ensure we stay on the same domain
-        if (new URL(resolvedUrl).hostname === baseUrl.hostname) {
-          subpagesToVisit.add(resolvedUrl);
-        }
-      } catch {
-        // Ignore invalid URLs
-      }
+        if (new URL(resolvedUrl).hostname === baseUrl.hostname) subpagesToVisit.add(resolvedUrl);
+      } catch {}
     }
   });
 
-  // Fallbacks if no links found in DOM
   if (subpagesToVisit.size === 0) {
     subpagesToVisit.add(new URL("/contact", baseUrl.href).href);
     subpagesToVisit.add(new URL("/contact-us", baseUrl.href).href);
   }
 
-  // 3. Fetch up to 2 subpages concurrently to save time
   const urlsToFetch = Array.from(subpagesToVisit).slice(0, 2);
   const subpageHtmls = await Promise.all(urlsToFetch.map(url => fetchPage(url, 6000)));
   
   subpageHtmls.forEach(html => {
-    if (html) aggregateHtml += ` ${html}`; // Combine text
+    if (html) {
+      aggregateHtml += ` ${html}`;
+      const sub$ = cheerio.load(html);
+      sub$('a[href^="mailto:"]').each((_, el) => {
+        const href = sub$(el).attr('href');
+        if (href) extractedMailtos.push(href.replace('mailto:', '').split('?')[0].trim());
+      });
+    }
   });
 
-  // 4. Extract and Validate
-  const rawEmails = aggregateHtml.match(EMAIL_REGEX) || [];
+  const rawEmails = [...(aggregateHtml.match(EMAIL_REGEX) || []), ...extractedMailtos];
   const rawFacebook = aggregateHtml.match(FB_REGEX) || [];
 
   const finalEmails = validateAndRankEmails(rawEmails, baseUrl.hostname);
@@ -166,6 +135,8 @@ async function magicScrape(targetUrl: string) {
     extractedFacebook: finalFacebook.length > 0 ? finalFacebook.join(", ") : null,
   };
 }
+
+// ... Keep your existing POST and GET functions here exactly as they were (batchSize = 8)
 
 export async function POST() {
   try {

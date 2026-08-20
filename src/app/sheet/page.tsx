@@ -2,51 +2,36 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { getSheetData, updateSheetCell } from "@/actions/sheet";
+import { getSheetData, updateSheetCell, bulkUpdateSheetCells } from "@/actions/sheet";
 
-// Definition of all columns matching your Prisma schema
 const COLUMNS = [
-  { key: "name", label: "Name", type: "text" },
-  { key: "phone", label: "Phone", type: "text" },
-  { key: "email", label: "Email", type: "text" },
-  { key: "website", label: "Website", type: "text" },
+  { key: "name", label: "Business Name", type: "text" },
   { key: "category", label: "Category", type: "text" },
-  { key: "address", label: "Address", type: "text" },
-  { key: "placeId", label: "Place ID", type: "text" },
-  { key: "cid", label: "CID", type: "text" },
-  { key: "reviewCount", label: "Reviews", type: "number" },
-  { key: "averageRating", label: "Rating", type: "number" },
+  { key: "email", label: "Provided Email", type: "text" },
   { key: "extractedEmail", label: "Extracted Email", type: "text" },
-  { key: "extractedFacebook", label: "Extracted Facebook", type: "text" },
-  { key: "isExtracted", label: "Is Extracted", type: "boolean" },
-  { key: "isWebsiteWorking", label: "Web Working", type: "boolean" },
-  { key: "websiteError", label: "Web Error", type: "text" },
-  { key: "instagram", label: "Instagram", type: "text" },
-  { key: "facebook", label: "Facebook", type: "text" },
-  { key: "twitter", label: "Twitter", type: "text" },
-  { key: "linkedin", label: "LinkedIn", type: "text" },
-  { key: "yelp", label: "Yelp", type: "text" },
-  { key: "youtube", label: "YouTube", type: "text" },
-  { key: "emailSubject1", label: "Email 1 Subj", type: "text" },
+  { key: "website", label: "Website", type: "text" },
+  { key: "phone", label: "Phone", type: "text" },
+  { key: "isExtracted", label: "Scraped", type: "boolean" },
+  { key: "isWebsiteWorking", label: "Web OK", type: "boolean" },
+  { key: "emailSubject1", label: "Email 1 Subject", type: "text" },
   { key: "emailBody1", label: "Email 1 Body", type: "text" },
-  { key: "emailSent1", label: "Email 1 Sent", type: "date" },
-  { key: "emailSubject2", label: "Email 2 Subj", type: "text" },
-  { key: "emailBody2", label: "Email 2 Body", type: "text" },
-  { key: "emailSent2", label: "Email 2 Sent", type: "date" },
-  { key: "emailSubject3", label: "Email 3 Subj", type: "text" },
-  { key: "emailBody3", label: "Email 3 Body", type: "text" },
-  { key: "emailSent3", label: "Email 3 Sent", type: "date" },
-  { key: "viewedLink", label: "Viewed Link", type: "boolean" },
-  { key: "viewedWebsite", label: "Viewed Website", type: "boolean" },
-  { key: "logoUrl", label: "Logo URL", type: "text" },
+  { key: "emailSent1", label: "Sent 1", type: "date" },
+  { key: "viewedWebsite", label: "Viewed Web", type: "boolean" },
+  { key: "facebook", label: "Facebook", type: "text" },
+  { key: "address", label: "Address", type: "text" },
 ];
 
-export default function SheetPage() {
+export default function AdvancedSheetPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null);
+  
+  // Bulk Edit State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkField, setBulkField] = useState(COLUMNS[0].key);
+  const [bulkValue, setBulkValue] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -60,45 +45,66 @@ export default function SheetPage() {
 
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === "asc") {
-      direction = "desc";
-    }
+    if (sortConfig?.key === key && sortConfig.direction === "asc") direction = "desc";
     setSortConfig({ key, direction });
   };
 
   const handleCellSave = async (id: string, field: string, newValue: any) => {
     setEditingCell(null);
     const itemIndex = data.findIndex((d) => d.id === id);
-    const currentValue = data[itemIndex][field];
+    if (data[itemIndex][field] === newValue) return;
 
-    if (currentValue === newValue) return; // No changes made
-
-    // Optimistic UI update
     const updatedData = [...data];
     updatedData[itemIndex][field] = newValue;
     setData(updatedData);
 
     const res = await updateSheetCell(id, field, newValue);
     if (!res.success) {
-      alert(`Failed to save: ${res.error}`);
-      fetchData(); // Rollback if failed
+      alert(`Save failed: ${res.error}`);
+      fetchData();
     }
   };
 
-  const filteredAndSortedData = useMemo(() => {
-    let result = data;
+  const handleBulkUpdate = async () => {
+    if (selectedIds.size === 0) return;
+    const idsArray = Array.from(selectedIds);
+    
+    // Optimistic Update
+    const updatedData = data.map(row => {
+      if (idsArray.includes(row.id)) return { ...row, [bulkField]: bulkValue };
+      return row;
+    });
+    setData(updatedData);
+    setSelectedIds(new Set());
+    setBulkValue("");
 
-    // Search
+    const res = await bulkUpdateSheetCells(idsArray, bulkField, bulkValue);
+    if (!res.success) {
+      alert(`Bulk update failed: ${res.error}`);
+      fetchData();
+    }
+  };
+
+  const toggleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) setSelectedIds(new Set(filteredData.map(d => d.id)));
+    else setSelectedIds(new Set());
+  };
+
+  const toggleRowSelect = (id: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) newSelected.delete(id);
+    else newSelected.add(id);
+    setSelectedIds(newSelected);
+  };
+
+  const filteredData = useMemo(() => {
+    let result = data;
     if (search) {
       const lowerSearch = search.toLowerCase();
       result = result.filter((item) =>
-        Object.values(item).some((val) =>
-          String(val || "").toLowerCase().includes(lowerSearch)
-        )
+        Object.values(item).some((val) => String(val || "").toLowerCase().includes(lowerSearch))
       );
     }
-
-    // Sort
     if (sortConfig) {
       result.sort((a, b) => {
         const aVal = a[sortConfig.key] ?? "";
@@ -108,52 +114,104 @@ export default function SheetPage() {
         return 0;
       });
     }
-
     return result;
   }, [data, search, sortConfig]);
 
-  if (loading) return <div className="p-8 text-white bg-slate-900 min-h-screen">Loading database...</div>;
+  if (loading) return <div className="p-8 text-gray-500 min-h-screen bg-gray-50 font-sans">Loading data grid...</div>;
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-slate-200 text-sm overflow-hidden font-sans">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between p-4 bg-slate-800 border-b border-slate-700 shrink-0">
-        <h1 className="text-xl font-bold text-white">Database Sheet View</h1>
-        <div className="flex gap-4 items-center">
-          <span className="text-slate-400">{filteredAndSortedData.length} records</span>
-          <input
-            type="text"
-            placeholder="Search all rows..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="px-4 py-2 bg-slate-900 border border-slate-700 rounded-md focus:outline-none focus:border-blue-500 w-72"
-          />
+    <div className="flex flex-col h-screen bg-white text-sm font-sans text-gray-800">
+      
+      {/* Header & Toolbar */}
+      <div className="flex flex-col p-4 bg-white border-b border-gray-200 shrink-0 gap-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-gray-900 tracking-tight">Lead Database</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-gray-500 font-medium text-xs bg-gray-100 px-2 py-1 rounded-md">{filteredData.length} Records</span>
+            <input
+              type="text"
+              placeholder="Search anything..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-72 transition"
+            />
+          </div>
         </div>
+
+        {/* Bulk Action Toolbar */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-4 bg-blue-50 p-3 rounded-lg border border-blue-100 animate-in fade-in slide-in-from-top-2">
+            <span className="font-semibold text-blue-700">{selectedIds.size} selected</span>
+            <div className="flex items-center gap-2">
+              <select 
+                value={bulkField} 
+                onChange={e => setBulkField(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 bg-white text-gray-700 shadow-sm"
+              >
+                {COLUMNS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+              <input 
+                type="text" 
+                placeholder="New value..." 
+                value={bulkValue} 
+                onChange={e => setBulkValue(e.target.value)}
+                className="border border-gray-300 rounded px-3 py-1.5 bg-white shadow-sm w-64"
+              />
+              <button 
+                onClick={handleBulkUpdate}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded font-medium shadow-sm transition"
+              >
+                Apply to Selected
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Spreadsheet Table */}
-      <div className="flex-1 overflow-auto bg-slate-900">
+      {/* Data Grid */}
+      <div className="flex-1 overflow-auto bg-white">
         <table className="w-full border-collapse whitespace-nowrap">
-          <thead className="sticky top-0 bg-slate-800 z-10 shadow-sm border-b border-slate-700">
+          <thead className="sticky top-0 bg-gray-50 z-20 shadow-[0_1px_0_#e5e7eb]">
             <tr>
-              <th className="px-3 py-2 text-left font-semibold text-slate-300 border-r border-slate-700 w-16 sticky left-0 bg-slate-800 z-20">
+              <th className="px-4 py-3 border-r border-gray-200 sticky left-0 bg-gray-50 z-30 w-12">
+                <input 
+                  type="checkbox" 
+                  checked={selectedIds.size === filteredData.length && filteredData.length > 0}
+                  onChange={toggleSelectAll}
+                  className="rounded border-gray-300 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                />
+              </th>
+              <th className="px-3 py-3 text-left font-semibold text-gray-600 border-r border-gray-200 sticky left-12 bg-gray-50 z-30 w-16 shadow-[1px_0_0_#e5e7eb]">
                 #
               </th>
               {COLUMNS.map((col) => (
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key)}
-                  className="px-3 py-2 text-left font-semibold text-slate-300 border-r border-slate-700 cursor-pointer hover:bg-slate-700 select-none min-w-[150px]"
+                  className="px-4 py-3 text-left font-semibold text-gray-600 border-r border-gray-200 cursor-pointer hover:bg-gray-100 select-none group"
                 >
-                  {col.label} {sortConfig?.key === col.key && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                  <div className="flex items-center gap-1">
+                    {col.label}
+                    <span className="text-gray-400 group-hover:text-gray-600">
+                      {sortConfig?.key === col.key ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </div>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filteredAndSortedData.map((row, index) => (
-              <tr key={row.id} className="hover:bg-slate-800/50 border-b border-slate-800 group">
-                <td className="px-3 py-1.5 text-slate-500 border-r border-slate-800 sticky left-0 bg-slate-900 group-hover:bg-slate-800 z-10">
+            {filteredData.map((row, index) => (
+              <tr key={row.id} className={`hover:bg-gray-50/80 border-b border-gray-100 group transition-colors ${selectedIds.has(row.id) ? 'bg-blue-50/30' : ''}`}>
+                <td className="px-4 py-2 border-r border-gray-100 sticky left-0 bg-white group-hover:bg-gray-50 z-10 text-center">
+                   <input 
+                    type="checkbox" 
+                    checked={selectedIds.has(row.id)}
+                    onChange={() => toggleRowSelect(row.id)}
+                    className="rounded border-gray-300 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                  />
+                </td>
+                <td className="px-3 py-2 text-gray-400 font-medium border-r border-gray-100 sticky left-12 bg-white group-hover:bg-gray-50 z-10 shadow-[1px_0_0_#f3f4f6]">
                   {index + 1}
                 </td>
                 
@@ -161,55 +219,47 @@ export default function SheetPage() {
                   const isEditing = editingCell?.id === row.id && editingCell?.field === col.key;
                   let cellValue = row[col.key];
 
-                  // Boolean Checkbox Direct Edit
                   if (col.type === "boolean") {
                     return (
-                      <td key={col.key} className="px-3 py-1.5 border-r border-slate-800 text-center align-middle">
+                      <td key={col.key} className="px-4 py-2 border-r border-gray-100 text-center">
                         <input
                           type="checkbox"
                           checked={!!cellValue}
                           onChange={(e) => handleCellSave(row.id, col.key, e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 cursor-pointer accent-blue-600"
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                         />
                       </td>
                     );
                   }
 
-                  // Editable Input Mode
                   if (isEditing) {
                     return (
-                      <td key={col.key} className="p-0 border-r border-blue-600 outline outline-2 outline-blue-600 z-20 relative">
+                      <td key={col.key} className="p-0 border-r border-blue-500 outline outline-2 outline-blue-500 z-20 relative bg-white">
                         <input
                           autoFocus
-                          type={col.type === "date" ? "date" : col.type === "number" ? "number" : "text"}
-                          defaultValue={
-                            col.type === "date" && cellValue
-                              ? new Date(cellValue).toISOString().split("T")[0]
-                              : cellValue || ""
-                          }
+                          type={col.type === "date" ? "date" : "text"}
+                          defaultValue={col.type === "date" && cellValue ? new Date(cellValue).toISOString().split("T")[0] : cellValue || ""}
                           onBlur={(e) => handleCellSave(row.id, col.key, e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handleCellSave(row.id, col.key, e.currentTarget.value);
                             if (e.key === "Escape") setEditingCell(null);
                           }}
-                          className="w-full h-full px-3 py-1.5 bg-slate-950 text-white outline-none focus:ring-0 m-0"
+                          className="w-full h-full px-3 py-2 bg-transparent text-gray-900 outline-none m-0 shadow-inner"
                         />
                       </td>
                     );
                   }
 
-                  // Read-Only View Mode (Double click to edit)
                   return (
                     <td
                       key={col.key}
                       onDoubleClick={() => setEditingCell({ id: row.id, field: col.key })}
-                      className="px-3 py-1.5 border-r border-slate-800 cursor-cell text-slate-300 truncate max-w-[250px]"
-                      title={cellValue ? String(cellValue) : ""}
+                      className="px-4 py-2 border-r border-gray-100 cursor-cell text-gray-700 truncate max-w-[250px]"
                     >
                       {col.type === "date" && cellValue
                         ? new Date(cellValue).toLocaleDateString()
                         : cellValue === null || cellValue === undefined
-                        ? <span className="text-slate-600 italic">null</span>
+                        ? <span className="text-gray-300 italic">—</span>
                         : String(cellValue)}
                     </td>
                   );
@@ -218,10 +268,6 @@ export default function SheetPage() {
             ))}
           </tbody>
         </table>
-        
-        {filteredAndSortedData.length === 0 && (
-          <div className="p-8 text-center text-slate-500">No leads found.</div>
-        )}
       </div>
     </div>
   );
