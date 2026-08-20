@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model Lead {
+  id               String    @id @default(cuid())
+  
+  // Basic Business Info (from JSON)
+  name             String
+  phone            String?
+  email            String?
+  website          String?
+  address          String?
+  category         String?
+  placeId          String?   @unique
+  cid              String?
+  reviewCount      Int?
+  averageRating    Float?
+  latitude         Float?
+  longitude        Float?
+
+  // Social Links
+  instagram        String?
+  facebook         String?
+  twitter          String?
+  linkedin         String?
+  yelp             String?
+  youtube          String?
+
+  // Extracted Data from Website
+  extractedEmail   String?
+  extractedFacebook String?
+
+  // Website Status & Extraction Workflow Flags
+  isExtracted      Boolean   @default(false) // extracted_email_facebook_website
+  isWebsiteWorking Boolean?
+  websiteError     String?
+
+  // Email Campaign Tracking
+  emailSubject1    String?
+  emailBody1       String?
+  emailSent1       DateTime?
+
+  emailSubject2    String?
+  emailBody2       String?
+  emailSent2       DateTime?
+
+  emailSubject3    String?
+  emailBody3       String?
+  emailSent3       DateTime?
+
+  // User Engagement & Analytics
+  viewedLink       Boolean   @default(false)
+  viewedWebsite    Boolean   @default(false)
+
+  // Custom Website & Assets
+  logoUrl          String?
+  website1         Json?
+  website2         Json?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([isExtracted])
+  @@index([website])
+}

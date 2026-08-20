@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/extractemailfacebookurlfromwebsite",
+      "schedule": "*/2 * * * *"
+    }
+  ]
+}
