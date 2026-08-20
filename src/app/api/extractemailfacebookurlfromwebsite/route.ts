@@ -169,8 +169,9 @@ async function magicScrape(targetUrl: string) {
 
 export async function POST() {
   try {
-    // Process smaller batch sizes (5) because deep crawling takes longer
-    const batchSize = 2; 
+    // Increased to 8 because we are now running them in parallel!
+    const batchSize = 8; 
+    
     const leads = await prisma.lead.findMany({
       where: { isExtracted: false },
       take: batchSize,
@@ -180,51 +181,51 @@ export async function POST() {
       return NextResponse.json({ message: "Completed", remaining: 0, logs: [] });
     }
 
-    const logs: Array<{ name: string; status: string; email?: string; fb?: string }> = [];
+    // Process all 8 leads AT THE SAME TIME using Promise.all
+    const logs = await Promise.all(
+      leads.map(async (lead) => {
+        if (!lead.website || lead.website.trim() === "") {
+          await prisma.lead.update({
+            where: { id: lead.id },
+            data: { isExtracted: true, isWebsiteWorking: false, websiteError: "No URL" },
+          });
+          return { name: lead.name, status: "Ignored (No URL)" };
+        }
 
-    for (const lead of leads) {
-      if (!lead.website || lead.website.trim() === "") {
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: { isExtracted: true, isWebsiteWorking: false, websiteError: "No URL" },
-        });
-        logs.push({ name: lead.name, status: "Ignored (No URL)" });
-        continue;
-      }
+        try {
+          // The magicScrape runs concurrently for all leads
+          const { extractedEmail, extractedFacebook } = await magicScrape(lead.website);
 
-      try {
-        const { extractedEmail, extractedFacebook } = await magicScrape(lead.website);
+          await prisma.lead.update({
+            where: { id: lead.id },
+            data: {
+              isExtracted: true,
+              isWebsiteWorking: true,
+              websiteError: null,
+              extractedEmail: extractedEmail || lead.extractedEmail,
+              extractedFacebook: extractedFacebook || lead.extractedFacebook,
+            },
+          });
 
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: {
-            isExtracted: true,
-            isWebsiteWorking: true,
-            websiteError: null,
-            // Only overwrite if we actually found something, otherwise keep existing DB data
-            extractedEmail: extractedEmail || lead.extractedEmail,
-            extractedFacebook: extractedFacebook || lead.extractedFacebook,
-          },
-        });
-
-        logs.push({
-          name: lead.name,
-          status: "Success",
-          email: extractedEmail || "None",
-          fb: extractedFacebook || "None",
-        });
-      } catch (err: any) {
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: {
-            isExtracted: true,
-            isWebsiteWorking: false,
-            websiteError: (err.message || "Failed").slice(0, 255),
-          },
-        });
-        logs.push({ name: lead.name, status: `Failed: ${err.message}` });
-      }
-    }
+          return {
+            name: lead.name,
+            status: "Success",
+            email: extractedEmail || "None",
+            fb: extractedFacebook || "None",
+          };
+        } catch (err: any) {
+          await prisma.lead.update({
+            where: { id: lead.id },
+            data: {
+              isExtracted: true,
+              isWebsiteWorking: false,
+              websiteError: (err.message || "Failed").slice(0, 255),
+            },
+          });
+          return { name: lead.name, status: `Failed: ${err.message}` };
+        }
+      })
+    );
 
     const remaining = await prisma.lead.count({ where: { isExtracted: false } });
     return NextResponse.json({ success: true, processed: leads.length, remaining, logs });
