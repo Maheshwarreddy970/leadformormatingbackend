@@ -32,16 +32,14 @@ export default function AdvancedSheetPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkField, setBulkField] = useState(COLUMNS[0].key);
   const [bulkValue, setBulkValue] = useState("");
+const [error, setError] = useState<string | null>(null);
+
 
   useEffect(() => {
     fetchData();
   }, []);
 
-  const fetchData = async () => {
-    const leads = await getSheetData();
-    setData(leads);
-    setLoading(false);
-  };
+ 
 
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
@@ -116,7 +114,44 @@ export default function AdvancedSheetPage() {
     }
     return result;
   }, [data, search, sortConfig]);
+// Update your fetchData function:
+const fetchData = async () => {
+  try {
+    const res = await getSheetData();
+    if (res.success) {
+      setData(res.data ?? []);
+    } else {
+      setError(`Database Error: ${res.error}`);
+    }
+  } catch (err: any) {
+    setError(`Network Error: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
+// Update your loading/error return block (replace your current `if (loading)` line):
+if (loading) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500 font-sans">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-6 h-6 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p>Loading data grid...</p>
+      </div>
+    </div>
+  );
+}
+
+if (error) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-gray-50 text-red-600 font-sans p-8 text-center">
+      <div className="bg-white p-6 rounded-lg shadow-md max-w-lg border border-red-200">
+        <h2 className="text-lg font-bold mb-2">Failed to load data</h2>
+        <p className="text-sm break-words">{error}</p>
+      </div>
+    </div>
+  );
+}
   if (loading) return <div className="p-8 text-gray-500 min-h-screen bg-gray-50 font-sans">Loading data grid...</div>;
 
   return (

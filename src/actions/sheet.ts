@@ -4,7 +4,13 @@
 import { prisma } from "@/lib/prisma";
 
 export async function getSheetData() {
-  return prisma.lead.findMany({ orderBy: { createdAt: "desc" } });
+  try {
+    const data = await prisma.lead.findMany({ orderBy: { createdAt: "desc" } });
+    return { success: true, data };
+  } catch (error: any) {
+    console.error("Database fetch error:", error);
+    return { success: false, error: error.message };
+  }
 }
 
 export async function updateSheetCell(id: string, field: string, value: any) {
